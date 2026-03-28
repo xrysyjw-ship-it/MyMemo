@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="메모">
+<title>메모</title>
+
+<!-- ══════════════════════
+  🔥 FIREBASE 설정
+  YOUR_*** → 본인 값으로 교체
+══════════════════════ -->
+<script>
+const FB = {
+  apiKey:            "AIzaSyCKD_4831hmPYSWXG3bj8g1ohRN44Vap1w",
+  authDomain:        "mymemo-6a7c3.firebaseapp.com",
+  databaseURL:       "https://mymemo-6a7c3-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:         "mymemo-6a7c3",
+  storageBucket:     "mymemo-6a7c3.firebasestorage.app",
+  messagingSenderId: "112671817071",
+  appId:             "1:112671817071:web:4a97f17209a7b22c78fc9a"
+};
+const DEMO = Object.values(FB).some(v => v.startsWith('YOUR_'));
+
+/* ── 슬림 모드 ── */
+window.toggleSlim = () => {
+  const s = document.body.classList.toggle('slim');
+  document.getElementById('slim-btn').textContent = s ? '□' : '─';
+  localStorage.setItem('memo-slim', s ? '1' : '0');
+};
+if (localStorage.getItem('memo-slim') === '1') {
+  document.body.classList.add('slim');
+  const b = document.getElementById('slim-btn'); if(b) b.textContent = '□';
+}
+
+/* ── 인라인 편집 ── */
+let editAtts = [];
+
+window.startEdit = id => {
+  document.querySelectorAll('.memo-item.editing').forEach(el => {
+    if (el.dataset.id !== id) closeEditUI(el.dataset.id);
+  });
+  const m = memos.find(m => m.id === id); if (!m) return;
+  editAtts = [...(m.attaches||[])];
+  const el = document.querySelector('[data-id="'+id+'"]'); if (!el) return;
+  el.classList.add('editing');
+  el.querySelector('.mi-title') && (el.querySelector('.mi-title').style.display = 'none');
+  el.querySelector('.mi-sub')   && (el.querySelector('.mi-sub').style.display = 'none');
+  el.querySelector('.mi-attaches') && (el.querySelector('.mi-attaches').style.display = 'none');
+  const d = document.createElement('div'); d.className = 'edit-container';
+  d.innerHTML = `<textarea class="edit-area" id="ea-${id}" rows="3" placeholder="첫 줄이 제목…">${escH(m.body)}</textarea>
+    <div class="edit-att-wrap" id="eaw-${id}"></div>
+    <div class="edit-toolbar">
+      <button class="et-btn" onclick="editImg('${id}')">📷</button>
+      <button class="et-btn" onclick="editLink('${id}','google')">🔗 구글</button>
+      <button class="et-btn" onclick="editLink('${id}','web')">🌐 링크</button>
+      <button class="et-btn cancel-et" onclick="closeEditUI('${id}')">취소</button>
+      <button class="et-btn save-et" onclick="saveEdit('${id}')">저장</button>
+    </div>`;
+  el.appendChild(d);
+  const ta = document.getElementById('ea-'+id);
+  ta.style.height = Math.max(ta.scrollHeight,60)+'px';
+  ta.addEventListener('input', ()=>{ ta.style.height='auto'; ta.style.height=Math.max(ta.scrollHeight,60)+'px'; });
+  ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  renderEditAtts(id);
+  document.getElementById('file-input-img').dataset.editId = id;
+};
+
+function renderEditAtts(id) {
+  const el = document.getElementById('eaw-'+id); if (!el) return;
+  el.innerHTML = editAtts.map((a,i) => a.type==='image'
+    ? `<div class="ap-item"><img src="${escH(a.url)}" style="width:24px;height:24px;object-fit:cover;border-radius:3px"><span>${escH(a.name||'사진')}</span><span class="ap-del" onclick="editRemAtt(${i},'${id}')">✕</span></div>`
+    : `<div class="ap-item"><span>${a.type==='google'?'🔗':'🌐'}</span><span>${escH(a.name||a.url)}</span><span class="ap-del" onclick="editRemAtt(${i},'${id}')">✕</span></div>`
+  ).join('');
+}
+window.editRemAtt = (i,id) => { editAtts.splice(i,1); renderEditAtts(id); };
+window.editImg = id => { document.getElementById('file-input-img').dataset.editId=id; document.getElementById('file-input-img').click(); };
+window.editLink = (id,type) => {
+  const url = prompt(type==='google'?'Google 링크':'웹 주소'); if(!url||!url.trim()) return;
+  const u = url.trim().startsWith('http') ? url.trim() : 'https://'+url.trim();
+  let name=u; try{name=new URL(u).hostname.replace('www.','')}catch(e){}
+  editAtts.push({type,url:u,name}); renderEditAtts(id);
+};
+window.saveEdit = id => {
+  const ta = document.getElementById('ea-'+id); if (!ta) return;
+  const m = memos.find(m=>m.id===id); if (!m) return;
+  m.body = ta.value.trim() || m.body;
+  m.attaches = [...editAtts];
+  m.edited = Date.now();
+  closeEditUI(id);
+  persist(); render();
+};
+window.closeEditUI = id => {
+  const el = document.querySelector('[data-id="'+id+'"]'); if (!el) return;
+  el.classList.remove('editing');
+  ['mi-title','mi-sub','mi-attaches'].forEach(cls => {
+    const e = el.querySelector('.'+cls); if(e) e.style.display='';
+  });
+  const ec = el.querySelector('.edit-container'); if(ec) ec.remove();
+};
+
+</script>
+
+<style>
+/* ── 구글 폰트 ── */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; }
+
+:root {
+  /* 아이보리 종이 톤 */
+  --paper:       #faf8f3;
+  --paper2:      #f4f1e8;
+  --paper3:      #ede9dc;
+  --ink:         #2a2720;
+  --ink2:        #6b6459;
+  --ink3:        #a8a094;
+  --rule:        rgba(160,148,120,0.18);
+  --rule2:       rgba(140,128,100,0.28);
+  --accent:      #3d6ee8;
+  --accent-bg:   rgba(61,110,232,0.08);
+  --green:       #2e9e6b;
+  --green-bg:    rgba(46,158,107,0.08);
+  --red:         #c94040;
+  --red-bg:      rgba(201,64,64,0.08);
+  --shadow:      0 2px 16px rgba(100,85,60,0.12), 0 1px 4px rgba(100,85,60,0.08);
+  --shadow-lg:   0 8px 40px rgba(80,65,40,0.18), 0 2px 8px rgba(80,65,40,0.1);
+  --radius:      10px;
+  --font:        'Noto Sans KR', -apple-system, sans-serif;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--paper);
+  color: var(--ink);
+  line-height: 1.6;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+/* ── 데스크톱: 플로팅 창 ── */
+body.desktop {
+  background: rgba(200,190,170,0.35);
+  backdrop-filter: blur(30px) saturate(1.5);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 0;
+}
+body.desktop #wrap {
+  width: 400px;
+  min-height: 100vh;
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+  border-left: 1px solid var(--rule2);
+  border-right: 1px solid var(--rule2);
+  display: flex; flex-direction: column;
+}
+
+/* ── 모바일 ── */
+body.mobile #wrap {
+  width: 100%; max-width: 100%;
+  min-height: 100dvh;
+  display: flex; flex-direction: column;
+}
+
+/* ── 태블릿 ── */
+body.tablet {
+  display: flex; align-items: flex-start; justify-content: center;
+}
+body.tablet #wrap {
+  width: 560px; min-height: 100dvh;
+  background: var(--paper);
+  box-shadow: var(--shadow-lg);
+  border-left: 1px solid var(--rule2);
+  border-right: 1px solid var(--rule2);
+  display: flex; flex-direction: column;
+}
+
+/* ══ 헤더 ══ */
+#hd {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px 12px;
+  border-bottom: 1.5px solid var(--rule2);
+  background: var(--paper);
+  position: sticky; top: 0; z-index: 50;
+  user-select: none;
+}
+#hd-title {
+  font-size: 15px; font-weight: 700;
+  letter-spacing: -0.4px; flex: 1;
+  color: var(--ink);
+}
+.hd-meta { font-size: 11px; color: var(--ink3); display: flex; align-items: center; gap: 6px; }
+#sync-badge {
+  font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 20px;
+  border: 1px solid var(--rule2);
+  color: var(--ink3); background: var(--paper2);
+  transition: all 0.3s;
+}
+#sync-badge.ok   { color: var(--green); background: var(--green-bg); border-color: rgba(46,158,107,0.25); }
+#sync-badge.ing  { color: var(--accent); background: var(--accent-bg); border-color: rgba(61,110,232,0.25); }
+#sync-badge.demo { color: var(--red); background: var(--red-bg); border-color: rgba(201,64,64,0.2); }
+
+/* ── 뷰 전환 탭 (Active/Archive) ── */
+#view-tabs {
+  display: flex; gap: 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper2);
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+.vtab {
+  padding: 8px 14px; font-size: 12px; font-weight: 600;
+  color: var(--ink3); cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.vtab.on { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── 새 메모 입력 영역 ── */
+#composer {
+  border-bottom: 1.5px solid var(--rule2);
+  background: var(--paper);
+  padding: 12px 16px;
+  flex-shrink: 0;
+}
+#compose-box {
+  width: 100%;
+  font-family: var(--font);
+  font-size: 13.5px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  line-height: 1.65;
+  min-height: 48px;
+  max-height: 160px;
+}
+#compose-box::placeholder { color: var(--ink3); }
+
+#compose-tools {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  border-top: 1px solid var(--rule); padding-top: 8px;
+}
+.ct-btn {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600; color: var(--ink2);
+  background: var(--paper2); border: 1px solid var(--rule2);
+  border-radius: 6px; padding: 5px 9px; cursor: pointer;
+  transition: all 0.15s; font-family: var(--font);
+  white-space: nowrap;
+}
+.ct-btn:hover { background: var(--paper3); color: var(--ink); }
+.ct-btn.primary {
+  margin-left: auto;
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.ct-btn.primary:hover { opacity: 0.88; }
+.ct-spacer { flex: 1; }
+
+/* ── 첨부 미리보기 ── */
+#attach-preview {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 8px;
+}
+.ap-item {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--paper2); border: 1px solid var(--rule2);
+  border-radius: 6px; padding: 4px 8px;
+  font-size: 11px; color: var(--ink2);
+  max-width: 180px; overflow: hidden;
+}
+.ap-item img { width: 28px; height: 28px; object-fit: cover; border-radius: 3px; flex-shrink: 0; }
+.ap-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-del {
+  cursor: pointer; color: var(--ink3); font-size: 12px;
+  margin-left: auto; flex-shrink: 0; padding: 0 2px;
+}
+.ap-del:hover { color: var(--red); }
+
+/* ── 메모 목록 ── */
+#memo-list {
+  flex: 1; overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+#memo-list::-webkit-scrollbar { width: 4px; }
+#memo-list::-webkit-scrollbar-thumb { background: var(--paper3); border-radius: 2px; }
+
+.memo-item {
+  border-bottom: 1px solid var(--rule);
+  padding: 13px 16px 11px;
+  transition: background 0.15s;
+  animation: fadeSlide 0.2s ease;
+  position: relative;
+}
+.memo-item:hover { background: rgba(0,0,0,0.015); }
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 메모 헤더 줄 */
+.mi-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 5px;
+}
+.mi-num {
+  font-size: 10px; font-weight: 700;
+  color: var(--ink3); background: var(--paper2);
+  padding: 1px 6px; border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--rule2);
+  flex-shrink: 0;
+}
+.mi-ts {
+  font-size: 10px; color: var(--ink3);
+  font-variant-numeric: tabular-nums;
+  flex: 1;
+}
+.mi-actions { display: flex; gap: 4px; }
+.mi-btn {
+  width: 26px; height: 26px;
+  background: none; border: 1px solid transparent;
+  border-radius: 6px; cursor: pointer;
+  font-size: 13px; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s; color: var(--ink3);
+}
+.mi-btn:hover { background: var(--paper2); border-color: var(--rule2); color: var(--ink); }
+.mi-btn.done-btn:hover { color: var(--green); background: var(--green-bg); }
+.mi-btn.del-btn:hover  { color: var(--red);   background: var(--red-bg); }
+.mi-btn.restore-btn:hover { color: var(--accent); background: var(--accent-bg); }
+
+/* 메모 본문 */
+.mi-body {
+  font-size: 13.5px; color: var(--ink);
+  line-height: 1.7; word-break: break-word;
+  white-space: pre-wrap;
+}
+.mi-body.done-text { color: var(--ink3); text-decoration: line-through; }
+
+/* 첨부물 */
+.mi-attaches {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+}
+.att-img {
+  width: 64px; height: 64px; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--rule2);
+  cursor: pointer;
+}
+.att-link {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--accent-bg); border: 1px solid rgba(61,110,232,0.2);
+  border-radius: 6px; padding: 5px 9px;
+  font-size: 11px; color: var(--accent); text-decoration: none;
+  max-width: 220px; overflow: hidden;
+}
+.att-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 완료 구분선 */
+.archive-divider {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+  color: var(--ink3); text-transform: uppercase;
+  background: var(--paper2);
+  border-bottom: 1px solid var(--rule);
+}
+.archive-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--rule2);
+}
+
+/* 빈 상태 */
+.empty {
+  text-align: center; padding: 48px 24px;
+  color: var(--ink3); font-size: 13px; line-height: 2.2;
+}
+.empty-icon { font-size: 32px; display: block; margin-bottom: 8px; opacity: 0.4; }
+
+/* ── 이미지 전체화면 뷰어 ── */
+#img-viewer {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.88); z-index: 200;
+  align-items: center; justify-content: center;
+  cursor: zoom-out;
+}
+#img-viewer.show { display: flex; }
+#img-viewer img { max-width: 94vw; max-height: 90vh; border-radius: 8px; }
+
+/* ── 숨긴 파일 입력 ── */
+#file-input-img  { display: none; }
+#file-input-file { display: none; }
+
+/* ── Firebase 미설정 배너 ── */
+#demo-banner {
+  display: none;
+  background: var(--red-bg);
+  border-bottom: 1px solid rgba(201,64,64,0.18);
+  padding: 6px 16px; font-size: 11px; color: var(--red);
+  font-weight: 600; text-align: center; flex-shrink: 0;
+}
+
+/* ── 모바일 키보드 대응 ── */
+@media (max-height: 500px) {
+  #composer { padding: 8px 14px; }
+  #compose-box { min-height: 36px; }
+}
+
+/* ── 제목/본문 ── */
+.mi-title { font-size: 13.5px; font-weight: 700; color: var(--ink); margin-bottom: 2px; word-break: break-word; line-height: 1.45; }
+.mi-title.done-text { text-decoration: line-through; color: var(--ink3); }
+.mi-sub { font-size: 12.5px; color: var(--ink2); line-height: 1.65; word-break: break-word; white-space: pre-wrap; margin-top: 1px; }
+.mi-sub.done-text { text-decoration: line-through; color: var(--ink3); }
+.mobile .mi-title { font-size: 15px; }
+.mobile .mi-sub   { font-size: 13.5px; }
+
+/* ── 슬림 모드 ── */
+.slim #view-tabs, .slim #search-bar, .slim #progress-bar,
+.slim #panels, .slim #quick-add, .slim #demo-banner { display: none !important; }
+.slim #hd { border-bottom: none; }
+.desktop.slim #wrap, .tablet.slim #wrap { min-height: unset; height: auto; }
+
+/* ── 슬림 토글 버튼 ── */
+#slim-btn {
+  width: 22px; height: 22px; background: var(--paper2); border: 1px solid var(--rule2);
+  border-radius: 6px; cursor: pointer; font-size: 12px; display: flex;
+  align-items: center; justify-content: center; color: var(--ink2);
+  transition: all 0.15s; flex-shrink: 0;
+}
+#slim-btn:hover { background: var(--paper3); }
+
+/* ── 인라인 편집 ── */
+.memo-item.editing { background: rgba(61,110,232,0.04); border-left: 2px solid var(--accent); padding-left: 14px; }
+.edit-area {
+  width: 100%; background: transparent; border: none; border-bottom: 1px solid var(--rule2);
+  color: var(--ink); font-family: var(--font); font-size: 13.5px;
+  line-height: 1.7; resize: none; outline: none; padding: 2px 0 4px; margin: 2px 0 6px;
+}
+.edit-area:focus { border-bottom-color: var(--accent); }
+.mobile .edit-area { font-size: 14px; }
+.edit-toolbar { display: flex; gap: 5px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); flex-wrap: wrap; }
+.et-btn {
+  display: flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600;
+  color: var(--ink2); background: var(--paper2); border: 1px solid var(--rule2);
+  border-radius: 6px; padding: 4px 8px; cursor: pointer; font-family: var(--font);
+}
+.et-btn:hover { background: var(--paper3); }
+.et-btn.save-et { background: var(--accent); color: #fff; border-color: var(--accent); margin-left: auto; }
+.et-btn.cancel-et { color: var(--ink3); }
+.edit-att-wrap { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+.mi-btn.edit-btn:hover { color: var(--accent); background: var(--accent-bg); }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+
+  <!-- 헤더 -->
+  <div id="hd">
+    <div id="hd-title">메모</div>
+    <div class="hd-meta">
+      <span id="hd-date"></span>
+      <span id="hd-clock"></span>
+    </div>
+    <div id="sync-badge" class="demo">LOCAL</div>
+    <button id="slim-btn" onclick="toggleSlim()" title="최소화">─</button>
+  </div>
+
+  <!-- Firebase 미설정 배너 -->
+  <div id="demo-banner">⚠ Firebase 미설정 — 이 기기에만 저장됩니다</div>
+
+  <!-- 뷰 탭 -->
+  <div id="view-tabs">
+    <div class="vtab on"  data-v="active"  onclick="setView('active')">진행 <span id="cnt-active"></span></div>
+    <div class="vtab"     data-v="archive" onclick="setView('archive')">완료 <span id="cnt-archive"></span></div>
+  </div>
+
+  <!-- 새 메모 입력 (진행 뷰에서만) -->
+  <div id="composer">
+    <textarea id="compose-box" placeholder="첫 줄이 제목 · 줄바꿈 후 상세 내용…"
+      rows="2"
+      onkeydown="handleComposeSend(event)"
+      oninput="autoGrow(this)"></textarea>
+
+    <!-- 첨부 미리보기 -->
+    <div id="attach-preview"></div>
+
+    <div id="compose-tools">
+      <!-- 사진 -->
+      <button class="ct-btn" onclick="document.getElementById('file-input-img').click()" title="사진 첨부">
+        📷 사진
+      </button>
+      <!-- 구글 드라이브 링크 -->
+      <button class="ct-btn" onclick="promptLink('google')" title="구글 링크">
+        🔗 구글
+      </button>
+      <!-- 인터넷 링크 -->
+      <button class="ct-btn" onclick="promptLink('web')" title="웹 링크">
+        🌐 링크
+      </button>
+      <span class="ct-spacer"></span>
+      <!-- 저장 -->
+      <button class="ct-btn primary" onclick="saveMemo()">저장</button>
+    </div>
+  </div>
+
+  <!-- 메모 목록 -->
+  <div id="memo-list"></div>
+
+</div>
+
+<!-- 이미지 뷰어 -->
+<div id="img-viewer" onclick="this.classList.remove('show')">
+  <img id="viewer-img" src="">
+</div>
+
+<!-- 파일 입력 -->
+<input type="file" id="file-input-img" accept="image/*" onchange="attachImage(event)">
+
+<script type="module">
+import { initializeApp }                  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getDatabase, ref, onValue, set } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
+/* ── 기기 감지 ── */
+const isPhone  = (/iPhone|Android.*Mobile|Mobile.*Android/i.test(navigator.userAgent)) && window.innerWidth < 768;
+const isTablet = !isPhone && (/iPad|Android/i.test(navigator.userAgent) || (window.innerWidth >= 600 && window.innerWidth < 1200));
+document.body.classList.add(isPhone ? 'mobile' : isTablet ? 'tablet' : 'desktop');
+
+/* ── 유틸 ── */
+const $  = id => document.getElementById(id);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,5);
+const fmtDate = ts => {
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2,'0');
+  const days = ['일','월','화','수','목','금','토'];
+  return `${d.getMonth()+1}/${d.getDate()}(${days[d.getDay()]}) ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const escH = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+/* ── 상태 ── */
+let memos   = [];     // { id, ts, body, attaches:[{type,url,name}], done, doneTs }
+let draft   = { attaches: [] };   // 작성 중 첨부
+let view    = 'active';   // 'active' | 'archive'
+let fbDb    = null, fbRef = null;
+let counter = 0;  // 진행 메모 표시 번호용
+
+/* ── 데모 배너 ── */
+if (DEMO) $('demo-banner').style.display = 'block';
+
+/* ── Firebase 초기화 ── */
+if (!DEMO) {
+  try {
+    const app = initializeApp(FB);
+    fbDb  = getDatabase(app);
+    fbRef = ref(fbDb, 'memos_v5');
+    setSyncBadge('ing', '연결중');
+    onValue(fbRef, snap => {
+      const v = snap.val();
+      if (v && Array.isArray(v)) { memos = v; saveCacheLocal(); }
+      setSyncBadge('ok', '동기화됨');
+      render();
+    }, () => setSyncBadge('', 'OFFLINE'));
+  } catch(e) { setSyncBadge('', 'ERR'); console.error(e); }
+} else {
+  const c = localStorage.getItem('memos_v5');
+  if (c) try { memos = JSON.parse(c); } catch(e){}
+}
+
+function saveCacheLocal() {
+  try { localStorage.setItem('memos_v5', JSON.stringify(memos)); } catch(e){}
+}
+async function persist() {
+  saveCacheLocal();
+  if (!fbDb || DEMO) return;
+  setSyncBadge('ing', '저장중');
+  try {
+    await set(fbRef, memos);
+    setSyncBadge('ok', '동기화됨');
+  } catch(e) { setSyncBadge('', 'OFFLINE'); }
+}
+
+function setSyncBadge(cls, label) {
+  const b = $('sync-badge');
+  b.className = cls;
+  b.textContent = label;
+}
+
+/* ── 시계 ── */
+function tick() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const days = ['일','월','화','수','목','금','토'];
+  $('hd-date').textContent = `${d.getMonth()+1}/${d.getDate()}(${days[d.getDay()]})`;
+  $('hd-clock').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+setInterval(tick, 1000); tick();
+
+/* ── 뷰 전환 ── */
+window.setView = v => {
+  view = v;
+  document.querySelectorAll('.vtab').forEach(t => t.classList.toggle('on', t.dataset.v === v));
+  $('composer').style.display = v === 'active' ? '' : 'none';
+  render();
+};
+
+/* ── 렌더 ── */
+function render() {
+  const active  = memos.filter(m => !m.done).reverse();
+  const archive = memos.filter(m =>  m.done).reverse();
+
+  $('cnt-active').textContent  = active.length  ? `(${active.length})`  : '';
+  $('cnt-archive').textContent = archive.length ? `(${archive.length})` : '';
+
+  const list = $('memo-list');
+  list.innerHTML = '';
+
+  const items = view === 'active' ? active : archive;
+
+  if (!items.length) {
+    list.innerHTML = `<div class="empty">
+      <span class="empty-icon">${view === 'active' ? '📋' : '📦'}</span>
+      ${view === 'active' ? '메모가 없습니다<br>위에서 새 메모를 작성하세요' : '완료된 메모가 없습니다'}
+    </div>`;
+    return;
+  }
+
+  items.forEach((m, i) => {
+    const num = view === 'active' ? active.length - i : archive.length - i;
+    const div = document.createElement('div');
+    div.className = 'memo-item';
+    div.dataset.id = m.id;
+    div.innerHTML = memoHTML(m, num);
+    list.appendChild(div);
+  });
+}
+
+function memoHTML(m, num) {
+  const attHtml = (m.attaches||[]).map(a => {
+    if (a.type === 'image') {
+      return `<img class="att-img" src="${escH(a.url)}" loading="lazy"
+        onclick="openImg('${escH(a.url)}')" title="클릭하면 크게 봅니다">`;
+    }
+    return `<a class="att-link" href="${escH(a.url)}" target="_blank" rel="noopener">
+      <span>${a.type==='google'?'🔗':'🌐'}</span>
+      <span>${escH(a.name||a.url)}</span>
+    </a>`;
+  }).join('');
+
+  const isArchive = view === 'archive';
+  const actions = isArchive
+    ? `<button class="mi-btn edit-btn" onclick="startEdit('\${m.id}');event.stopPropagation()" title="편집">✏</button>
+       <button class="mi-btn restore-btn" onclick="restoreMemo('\${m.id}');event.stopPropagation()" title="되돌리기">↩</button>
+       <button class="mi-btn del-btn"     onclick="deleteMemo('\${m.id}');event.stopPropagation()" title="영구삭제">🗑</button>`
+    : `<button class="mi-btn edit-btn" onclick="startEdit('\${m.id}');event.stopPropagation()" title="편집">✏</button>
+       <button class="mi-btn done-btn" onclick="doneMemo('\${m.id}');event.stopPropagation()" title="완료">✓</button>
+       <button class="mi-btn del-btn"  onclick="deleteMemo('\${m.id}');event.stopPropagation()" title="삭제">🗑</button>`;
+
+  return `
+  <div class="mi-head">
+    <span class="mi-num">#${num}</span>
+    <span class="mi-ts">${fmtDate(m.ts)}</span>
+    <div class="mi-actions">${actions}</div>
+  </div>
+  <div class="mi-title\${isArchive?' done-text':''}">\${escH(m.body.split('\\n')[0])}</div>
+  \${(()=>{const sub=m.body.split('\\n').slice(1).join('\\n').trim();return sub?`<div class="mi-sub\${isArchive?' done-text':''}">` + escH(sub) + '</div>':''})()}
+  ${attHtml ? `<div class="mi-attaches">${attHtml}</div>` : ''}`;
+}
+
+/* ── 메모 저장 ── */
+window.saveMemo = () => {
+  const body = $('compose-box').value.trim();
+  if (!body && draft.attaches.length === 0) return;
+  const m = {
+    id:       uid(),
+    ts:       Date.now(),
+    body:     body,
+    attaches: [...draft.attaches],
+    done:     false,
+    doneTs:   null
+  };
+  memos.push(m);
+  draft.attaches = [];
+  $('compose-box').value = '';
+  $('compose-box').style.height = '';
+  $('attach-preview').innerHTML = '';
+  persist();
+  render();
+};
+
+window.handleComposeSend = e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveMemo(); }
+};
+
+/* ── 완료 / 복원 / 삭제 ── */
+window.doneMemo = id => {
+  const m = memos.find(m => m.id === id);
+  if (m) { m.done = true; m.doneTs = Date.now(); persist(); render(); }
+};
+window.restoreMemo = id => {
+  const m = memos.find(m => m.id === id);
+  if (m) { m.done = false; m.doneTs = null; persist(); render(); }
+};
+window.deleteMemo = id => {
+  if (!confirm('이 메모를 영구 삭제할까요?')) return;
+  memos = memos.filter(m => m.id !== id);
+  persist(); render();
+};
+
+/* ── 첨부: 이미지 ── */
+window.attachImage = e => {
+  const file = e.target.files[0]; if (!file) return;
+  const editId = e.target.dataset.editId || '';
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const url = ev.target.result;
+    if (editId) {
+      editAtts.push({ type:'image', url, name: file.name });
+      renderEditAtts(editId);
+      e.target.dataset.editId = '';
+    } else {
+      draft.attaches.push({ type:'image', url, name: file.name });
+      renderPreview();
+    }
+  };
+  reader.readAsDataURL(file);
+  e.target.value = '';
+};
+
+/* ── 첨부: 링크 ── */
+window.promptLink = type => {
+  const placeholder = type === 'google'
+    ? 'Google Drive / Docs 링크를 붙여넣으세요'
+    : '웹 주소(URL)를 입력하세요';
+  const url = prompt(placeholder);
+  if (!url || !url.trim()) return;
+  const u = url.trim().startsWith('http') ? url.trim() : 'https://' + url.trim();
+  let name = u;
+  try { name = new URL(u).hostname.replace('www.',''); } catch(e){}
+  draft.attaches.push({ type, url: u, name });
+  renderPreview();
+};
+
+function renderPreview() {
+  $('attach-preview').innerHTML = draft.attaches.map((a, i) => {
+    if (a.type === 'image') {
+      return `<div class="ap-item">
+        <img src="${escH(a.url)}" alt="">
+        <span>${escH(a.name)}</span>
+        <span class="ap-del" onclick="removeAttach(${i})">✕</span>
+      </div>`;
+    }
+    return `<div class="ap-item">
+      <span>${a.type==='google'?'🔗':'🌐'}</span>
+      <span>${escH(a.name)}</span>
+      <span class="ap-del" onclick="removeAttach(${i})">✕</span>
+    </div>`;
+  }).join('');
+}
+
+window.removeAttach = i => {
+  draft.attaches.splice(i, 1);
+  renderPreview();
+};
+
+/* ── 이미지 뷰어 ── */
+window.openImg = url => {
+  $('viewer-img').src = url;
+  $('img-viewer').classList.add('show');
+};
+
+/* ── textarea 자동 높이 ── */
+window.autoGrow = el => {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+};
+
+/* ── 초기 렌더 ── */
+render();
+</script>
+</body>
+</html>
