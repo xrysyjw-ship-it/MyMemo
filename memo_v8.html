@@ -33,10 +33,10 @@ const DEMO = Object.values(FB).some(v => v.startsWith('YOUR_'));
 }
 body{font-family:var(--font);background:var(--paper);color:var(--ink);line-height:1.6;min-height:100dvh}
 body.desktop{background:rgba(200,190,170,.35);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5);display:flex;align-items:flex-start;justify-content:center}
-body.desktop #wrap{width:400px;min-height:100vh;background:var(--paper);box-shadow:0 8px 40px rgba(80,65,40,.18);border-left:1px solid var(--rule2);border-right:1px solid var(--rule2);display:flex;flex-direction:column}
+body.desktop #wrap{width:400px;height:100vh;background:var(--paper);box-shadow:0 8px 40px rgba(80,65,40,.18);border-left:1px solid var(--rule2);border-right:1px solid var(--rule2);display:flex;flex-direction:column;overflow:hidden}
 body.tablet{display:flex;align-items:flex-start;justify-content:center}
-body.tablet #wrap{width:560px;min-height:100dvh;background:var(--paper);box-shadow:0 8px 40px rgba(80,65,40,.18);border-left:1px solid var(--rule2);border-right:1px solid var(--rule2);display:flex;flex-direction:column}
-body.mobile #wrap{width:100%;min-height:100dvh;display:flex;flex-direction:column}
+body.tablet #wrap{width:560px;height:100dvh;background:var(--paper);box-shadow:0 8px 40px rgba(80,65,40,.18);border-left:1px solid var(--rule2);border-right:1px solid var(--rule2);display:flex;flex-direction:column;overflow:hidden}
+body.mobile #wrap{width:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #hd{display:flex;align-items:center;gap:8px;padding:12px 14px 10px;border-bottom:1.5px solid var(--rule2);background:var(--paper);position:sticky;top:0;z-index:50;user-select:none}
 #hd-title{font-size:15px;font-weight:700;letter-spacing:-.4px;flex:1}
 .hd-meta{font-size:11px;color:var(--ink3);display:flex;gap:5px}
@@ -119,11 +119,11 @@ body.mobile #wrap{width:100%;min-height:100dvh;display:flex;flex-direction:colum
     <div class="vtab" data-v="archive" onclick="setView('archive')">완료 <span id="cnt-archive"></span></div>
   </div>
   <div id="composer">
-    <textarea id="compose-box" rows="2" placeholder="첫 줄이 제목 - 줄바꿈 후 상세 내용..."
+    <textarea id="compose-box" rows="2" placeholder="제목 입력 (첫 줄)&#10;상세 내용은 줄바꿈 후 입력..."
       onkeydown="handleKey(event)" oninput="autoGrow(this)"></textarea>
     <div id="att-preview"></div>
     <div id="compose-tools">
-      <button class="ct-btn" onclick="document.getElementById('file-img').click()">&#128247; 사진</button>
+      <button class="ct-btn" onclick="document.getElementById('file-img').click()">&#128247; 사진 (복수)</button>
       <button class="ct-btn" onclick="addLink('google')">&#128279; 구글</button>
       <button class="ct-btn" onclick="addLink('web')">&#127758; 링크</button>
       <button class="ct-btn ct-primary" onclick="saveMemo()">저장</button>
@@ -134,7 +134,7 @@ body.mobile #wrap{width:100%;min-height:100dvh;display:flex;flex-direction:colum
 <div id="img-viewer" onclick="this.classList.remove('show')">
   <img id="viewer-img" src="">
 </div>
-<input type="file" id="file-img" accept="image/*" style="display:none" onchange="onImgFile(event)">
+<input type="file" id="file-img" accept="image/*" multiple style="display:none" onchange="onImgFile(event)">
 
 <script type="module">
 import { initializeApp }                  from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
@@ -307,15 +307,23 @@ window.addLink = type => {
 };
 
 window.onImgFile = e => {
-  const file = e.target.files[0]; if(!file) return;
+  const files = Array.from(e.target.files); if(!files.length) return;
   const editId = e.target.dataset.editId || '';
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const url = ev.target.result;
-    if (editId) { editAtts.push({ type:'image', url, name:file.name }); renderEditAtts(editId); e.target.dataset.editId = ''; }
-    else { draftAtts.push({ type:'image', url, name:file.name }); renderDraftAtts(); }
-  };
-  reader.readAsDataURL(file);
+  let loaded = 0;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const url = ev.target.result;
+      if (editId) { editAtts.push({ type:'image', url, name:file.name }); }
+      else { draftAtts.push({ type:'image', url, name:file.name }); }
+      loaded++;
+      if (loaded === files.length) {
+        if (editId) { renderEditAtts(editId); e.target.dataset.editId = ''; }
+        else { renderDraftAtts(); }
+      }
+    };
+    reader.readAsDataURL(file);
+  });
   e.target.value = '';
 };
 
