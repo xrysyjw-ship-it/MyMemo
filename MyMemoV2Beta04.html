@@ -784,7 +784,10 @@ window.startEdit=(id,type)=>{
   if(bw)bw.classList.replace('collapsed','expanded');
   const target=bi||(type==='ref'?el:null);if(!target)return;
   const bodyVal=type==='memo'?(item.body||''):((item.title||'')+(item.body?'\n'+item.body:''));
-  target.innerHTML=`<textarea class="edit-area" id="ea-${id}" rows="3">${bodyVal}</textarea>${type==='memo'?`<div style="font-size:11px;color:var(--ink3);margin:3px 0">일정: ${item.due||'없음'}</div>`:''}<div class="edit-att-wrap" id="eaw-${id}"></div><div class="edit-toolbar"><button class="et-btn" onclick="editFile('${id}','${type}')">📎</button><button class="et-btn" onclick="editLnk('${id}','${type}','google')">🔗</button><button class="et-btn" onclick="editLnk('${id}','${type}','web')">🌐</button><button class="et-btn" style="color:var(--ink3)" onclick="closeEdit()">취소</button><button class="et-btn et-save" onclick="saveEdit('${id}','${type}')">저장</button></div>`;
+  const dueVal=item.due||'';
+  const dueDate=dueVal?dueVal.slice(0,10):'';
+  const dueTime=dueVal&&dueVal.includes('T')?dueVal.slice(11,16):'';
+  target.innerHTML=`<textarea class="edit-area" id="ea-${id}" rows="3">${bodyVal}</textarea>${type==='memo'?`<div style="display:flex;align-items:center;gap:6px;margin:5px 0 3px"><span style="font-size:10px;color:var(--ink3);flex-shrink:0">📅 일정</span><input type="date" id="ed-date-${id}" value="${dueDate}" style="font-size:11px;border:1px solid var(--rule2);border-radius:5px;padding:2px 5px;background:var(--paper);color:var(--ink);font-family:var(--font)"><input type="time" id="ed-time-${id}" value="${dueTime}" style="font-size:11px;border:1px solid var(--rule2);border-radius:5px;padding:2px 5px;background:var(--paper);color:var(--ink);font-family:var(--font)"><button style="font-size:10px;padding:1px 6px;border:1px solid var(--rule2);border-radius:5px;background:var(--paper2);color:var(--red);cursor:pointer;font-family:var(--font)" onclick="document.getElementById('ed-date-${id}').value='';document.getElementById('ed-time-${id}').value=''">지우기</button></div>`:''}<div class="edit-att-wrap" id="eaw-${id}"></div><div class="edit-toolbar"><button class="et-btn" onclick="editFile('${id}','${type}')">📎</button><button class="et-btn" onclick="editLnk('${id}','${type}','google')">🔗</button><button class="et-btn" onclick="editLnk('${id}','${type}','web')">🌐</button><button class="et-btn" style="color:var(--ink3)" onclick="closeEdit()">취소</button><button class="et-btn et-save" onclick="saveEdit('${id}','${type}')">저장</button></div>`;
   const ta=$('ea-'+id);ta.style.height=Math.max(ta.scrollHeight,56)+'px';ta.addEventListener('input',()=>{ta.style.height='auto';ta.style.height=Math.max(ta.scrollHeight,56)+'px';});ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);
   renderEditAtts(id);$('file-'+type).dataset.editId=id;
 };
@@ -792,7 +795,31 @@ function renderEditAtts(id){const el=$('eaw-'+id);if(!el)return;el.innerHTML=edi
 window.editRemAtt=(i,id)=>{editAtts.splice(i,1);renderEditAtts(id);};
 window.editFile=(id,type)=>{$('file-'+type).dataset.editId=id;$('file-'+type).click();};
 window.editLnk=(id,type,lt)=>{const url=prompt(lt==='google'?'Google 링크':'웹 주소');if(!url?.trim())return;const u=url.trim().startsWith('http')?url.trim():'https://'+url.trim();let name=u;try{name=new URL(u).hostname.replace('www.','')}catch(e){}editAtts.push({type:lt,url:u,name});renderEditAtts(id);};
-window.saveEdit=(id,type)=>{const ta=$('ea-'+id);if(!ta)return;const raw=ta.value.trim();if(type==='memo'){const m=memos.find(m=>m.id===id);if(!m)return;m.body=raw||m.body;m.attaches=[...editAtts];}else{const r=refs.find(r=>r.id===id);if(!r)return;const ln=raw.split('\n');r.title=ln[0];r.body=ln.slice(1).join('\n').trim();r.attaches=[...editAtts];}editId=null;editType=null;persist();};
+window.saveEdit=(id,type)=>{
+  const ta=$('ea-'+id);if(!ta)return;
+  const raw=ta.value.trim();
+  if(type==='memo'){
+    const m=memos.find(m=>m.id===id);if(!m)return;
+    m.body=raw||m.body;
+    m.attaches=[...editAtts];
+    // 일정 날짜 수정 반영
+    const dateEl=$('ed-date-'+id);const timeEl=$('ed-time-'+id);
+    if(dateEl){
+      const d=dateEl.value;const t=timeEl?.value||'';
+      const newDue=d?(t?`${d}T${t}`:d):'';
+      const oldDue=m.due||'';
+      m.due=newDue||null;
+      // 연결된 캘린더 이벤트도 날짜 업데이트
+      const ev=events.find(e=>e.fromMemo===id);
+      if(ev&&newDue){ev.date=newDue.slice(0,10);ev.time=newDue.includes('T')?newDue.slice(11,16):null;}
+      else if(ev&&!newDue){events=events.filter(e=>e.fromMemo!==id);}
+    }
+  }else{
+    const r=refs.find(r=>r.id===id);if(!r)return;
+    const ln=raw.split('\n');r.title=ln[0];r.body=ln.slice(1).join('\n').trim();r.attaches=[...editAtts];
+  }
+  editId=null;editType=null;persist();
+};
 window.closeEdit=()=>{editId=null;editType=null;renderCur();};
 
 // 저장
