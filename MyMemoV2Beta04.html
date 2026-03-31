@@ -235,6 +235,8 @@ body.mobile #wrap{width:100%;height:100dvh;display:flex;flex-direction:column;ov
 .cml-place{font-size:10px;color:var(--ink3);flex-shrink:0}
 .cml-place a{color:var(--accent);text-decoration:none}
 .cml-done{font-size:11px;padding:2px 7px;border-radius:5px;border:1px solid var(--rule2);background:var(--paper2);color:var(--green);cursor:pointer;font-family:var(--font);font-weight:700;flex-shrink:0}
+.cml-edit{width:22px;height:22px;background:none;border:none;cursor:pointer;color:var(--accent);font-size:11px;flex-shrink:0}
+.cml-edit:hover{color:var(--orange)}
 .cml-del{width:20px;height:20px;background:none;border:none;cursor:pointer;color:var(--ink3);font-size:11px;flex-shrink:0}
 .cml-del:hover{color:var(--red)}
 
@@ -453,7 +455,8 @@ body.mobile #wrap{width:100%;height:100dvh;display:flex;flex-direction:column;ov
 <!-- 일정 추가 -->
 <div class="modal-bg" id="cal-modal">
   <div class="modal-panel">
-    <div class="modal-title">일정 추가 <button class="modal-close" onclick="closeModal('cal-modal')">✕</button></div>
+    <div class="modal-title" id="cal-modal-title">일정 추가 <button class="modal-close" onclick="closeModal('cal-modal')">✕</button></div>
+    <input type="hidden" id="cal-edit-id">
     <input type="text" class="modal-inp" id="cal-title-inp" placeholder="일정 제목...">
     <div style="display:flex;gap:8px;margin-bottom:8px">
       <input type="date" class="modal-inp" id="cal-date-inp" style="margin:0;flex:1">
@@ -723,10 +726,28 @@ function renderCalEvents(){
   if(!evts.length){const[y,mo,d]=calSel.split('-');el.innerHTML=`<div style="text-align:center;padding:14px;font-size:12px;color:var(--ink3)">${+mo}/${+d} 일정 없음</div>`;return;}
   el.innerHTML=evts.sort((a,b)=>(a.time||'').localeCompare(b.time||'')).map(e=>`<div class="cal-event-item"><div class="cal-event-dot" style="background:${e.color||'var(--accent)'}"></div><div><div class="cal-event-title">${esc(e.title)}</div>${e.time?`<div class="cal-event-time">${e.time}</div>`:''}${e.memo?`<div style="font-size:10px;color:var(--ink3)">${esc(e.memo)}</div>`:''}</div><button class="mi-trash-btn" onclick="toTrash('${e.id}','cal')">🗑</button></div>`).join('');
 }
+window.editCalEvent=id=>{
+  const e=events.find(e=>e.id===id);if(!e)return;
+  $('cal-edit-id').value=id;
+  $('cal-modal-title').innerHTML='일정 수정 <button class="modal-close" onclick="closeModal(\'cal-modal\')">✕</button>';
+  $('cal-title-inp').value=e.title||'';
+  $('cal-date-inp').value=e.date||'';
+  $('cal-time-inp').value=e.time||'';
+  $('cal-place-inp').value=e.memo||'';
+  openModal('cal-modal');
+};
 window.saveCalEvent=()=>{
   const title=$('cal-title-inp').value.trim();if(!title)return;
-  const COLORS=['#3d6ee8','#2e9e6b','#c94040','#d4680a','#7c3dd4'];
-  events.push({id:uid(),title,date:$('cal-date-inp').value,time:$('cal-time-inp').value||null,memo:$('cal-place-inp').value||null,color:COLORS[events.length%COLORS.length],ts:Date.now()});
+  const editId=$('cal-edit-id').value;
+  if(editId){
+    const e=events.find(e=>e.id===editId);
+    if(e){e.title=title;e.date=$('cal-date-inp').value;e.time=$('cal-time-inp').value||null;e.memo=$('cal-place-inp').value||null;}
+  }else{
+    const COLORS=['#3d6ee8','#2e9e6b','#c94040','#d4680a','#7c3dd4'];
+    events.push({id:uid(),title,date:$('cal-date-inp').value,time:$('cal-time-inp').value||null,memo:$('cal-place-inp').value||null,color:COLORS[events.length%COLORS.length],ts:Date.now()});
+  }
+  $('cal-edit-id').value='';
+  $('cal-modal-title').innerHTML='일정 추가 <button class="modal-close" onclick="closeModal(\'cal-modal\')">✕</button>';
   $('cal-title-inp').value='';$('cal-time-inp').value='';$('cal-place-inp').value='';
   closeModal('cal-modal');persist();renderCal();
 };
@@ -744,7 +765,7 @@ function renderMaster(){
     const origM=memos.find(m=>m.id===e.fromMemo);const tMin=origM?.travelMin||null;
     let tInfo='',dInfo='';
     if(e.memo){const kk=`https://map.kakao.com/link/to/${encodeURIComponent(e.memo)},0,0`;if(tMin){tInfo=` · 🚗${tMin}분`;if(e.time){const arr=new Date(e.date+'T'+e.time);const dep=new Date(arr.getTime()-(tMin+15)*60000);const p=n=>String(n).padStart(2,'0');dInfo=` · 🕐${p(dep.getHours())}:${p(dep.getMinutes())}출발`;}}tInfo=`<span class="cml-place"> · <a href="${kk}" target="_blank">📍${esc(e.memo.slice(0,8))}</a>${tInfo}${dInfo}</span>`;}
-    return`<div class="cml-item${isPast?' past':''}"><div class="cml-dot" style="background:${e.color}"></div><div class="cml-date ${isPast?'':'future'}${isT?' today-date':''}">${lbl}</div><div class="cml-name">${esc(e.title)}</div>${tInfo}<button class="cml-done" onclick="doneCalEvt('${e.id}')">✓</button><button class="cml-del" onclick="toTrash('${e.id}','cal')">🗑</button></div>`;
+    return`<div class="cml-item${isPast?' past':''}"><div class="cml-dot" style="background:${e.color}"></div><div class="cml-date ${isPast?'':'future'}${isT?' today-date':''}">${lbl}</div><div class="cml-name">${esc(e.title)}</div>${tInfo}<button class="cml-edit" onclick="editCalEvent('${e.id}')" title="수정">✏</button><button class="cml-done" onclick="doneCalEvt('${e.id}')">✓</button><button class="cml-del" onclick="toTrash('${e.id}','cal')">🗑</button></div>`;
   }).join('');
 }
 window.doneCalEvt=id=>{const e=events.find(e=>e.id===id);if(!e)return;e.done=true;toTrash(id,'cal');};
